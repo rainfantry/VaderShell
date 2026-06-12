@@ -3,6 +3,24 @@
 All notable changes to VaderShell. Built ground-up in a single session — this log
 tells the story of how it came together, and why each piece exists.
 
+## 0.2.0 — native slash commands
+
+### Slash commands (the `/` picker)
+- VADER now registers **native Discord slash commands**, shown under its own name in
+  the picker — so they don't collide with another bot's commands in a shared server.
+  `/help`, `/plan <task>`, `/model <name>`, `/reset`, `/restart`.
+- `/help` lists every command and what it does, so you never have to remember them.
+- The old typed-text commands still work as a fallback (e.g. before the slash
+  commands finish syncing on first launch).
+- Commands sync **per-guild** on startup (instant), not globally (slow to propagate).
+- Requires the bot to be invited with the `applications.commands` scope (see README).
+
+### Runtime brain switch — `/model`
+- `/model opus|sonnet|haiku|kimi` writes a runtime override (`runtime_override.env`,
+  gitignored) and reboots onto the new brain — switch models from your phone if one
+  model's quota runs dry mid-task, without touching the machine. The override is
+  loaded over base config at startup and wins over the launcher's default.
+
 ## 0.1.0 — first release
 
 ### The core idea

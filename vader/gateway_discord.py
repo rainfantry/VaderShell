@@ -4,18 +4,20 @@
 Turns VADER into a Discord bot: your messages get answered by the SAME
 `core.Agent` the terminal uses (full Claude + tools + your memory).
 
-Coalition mode: in a designated SERVER (or channel), a second bot (Kimi /
-SERVITOR) answers you, and VADER reads what it said and adds a second opinion.
-One-directional — VADER reads the peer; the peer is blind to VADER — so it can't
-loop. (Safety rests on the peer ignoring bots; a cooldown is the backup.)
+Native slash commands (the `/` picker, shown under VADER):
+  /help            — list the commands and what they do
+  /plan <task>     — two-model planning council (Claude + Kimi + synthesis)
+  /model <name>    — switch VADER's brain (opus|sonnet|haiku|kimi) and reboot onto it
+  /reset           — clear VADER's conversation memory
+  /restart         — reboot the gateway (supervised; reconnects in a few seconds)
+(The same commands also work typed as plain text, as a fallback.)
 
-Peer bots usually STREAM by editing one message ("Thinking… 0%" → partial → final),
-so VADER waits for the message to stop changing (debounce) and only then reads the
-FINAL text — never the placeholder or a half-written partial.
+Coalition mode: in a designated server/channel, a peer bot (Kimi/SERVITOR) answers
+you and VADER reads its FINAL reply (after streaming settles, skipping placeholders)
+and posts a second opinion. One-directional, so it can't loop.
 
-Everything is logged to `gateway.log` (and the terminal) for review.
-
-Run with:  python -m vader.gateway_discord
+Everything is logged to gateway.log (and the terminal). `/restart` exits 42 so the
+supervisor launcher relaunches a fresh process.
 """
 
 import asyncio
@@ -27,7 +29,12 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 _ROOT = Path(__file__).resolve().parent.parent
+# Base config first...
 load_dotenv(_ROOT / ".env")
+# ...then any runtime override written by /model (wins over the launcher's model).
+_OVERRIDE_FILE = _ROOT / "runtime_override.env"
+if _OVERRIDE_FILE.exists():
+    load_dotenv(_OVERRIDE_FILE, override=True)
 
 import discord
 
@@ -35,7 +42,7 @@ from .auth import resolve
 from .core import Agent
 from .council import run_council, _ask_claude
 
-# ── Logging — every event to gateway.log AND the terminal. ──
+# ── Logging ──
 _LOG_PATH = _ROOT / "gateway.log"
 logging.basicConfig(
     level=logging.INFO,
@@ -53,11 +60,16 @@ _ALLOWED_CHANNELS = {c.strip() for c in os.environ.get("VADER_DISCORD_CHANNEL_ID
 _COALITION_SERVER = os.environ.get("VADER_COALITION_SERVER_ID", "").strip()
 _COALITION_CHANNEL = os.environ.get("VADER_COALITION_CHANNEL_ID", "").strip()
 _PEER_BOT_ID = os.environ.get("VADER_PEER_BOT_ID", "").strip()
-
-# How long the peer message must go UNCHANGED before we treat it as final.
 _SETTLE_SECONDS = 5
 
-# Branded banner written to the log + terminal at startup.
+# /model aliases → (provider, model).
+_MODEL_ALIASES = {
+    "opus":   ("claude", "claude-opus-4-8"),
+    "sonnet": ("claude", "claude-sonnet-4-6"),
+    "haiku":  ("claude", "claude-haiku-4-5"),
+    "kimi":   ("openrouter", "moonshotai/kimi-k2.5"),
+}
+
 _BANNER = (
     "\n██████╗ ██████╗ ██████╗ ██╗██╗   ██╗\n"
     "╚════██╗╚════██╗██╔══██╗██║██║   ██║\n"
@@ -67,6 +79,18 @@ _BANNER = (
     "╚══════╝╚══════╝╚═════╝ ╚═╝  ╚═══╝\n"
     "   VADER · survey-tech command channel · george wu"
 )
+
+_HELP = (
+    "**VADER — commands**\n"
+    "`/plan <task>` — two-model planning council: Claude plans, Kimi plans, Claude compares both.\n"
+    "`/model <opus|sonnet|haiku|kimi>` — switch VADER's brain and reboot onto it.\n"
+    "`/reset` — clear VADER's conversation memory (start fresh).\n"
+    "`/restart` — reboot the gateway (reconnects in a few seconds).\n"
+    "`/help` — this list.\n"
+    "Otherwise, just message me — I answer with full tools, web search, and your memory."
+)
+
+_STATUS_MARKERS = ("Thinking", "thinking", "Self-improvement", "review:", "💾", "⚕", "⏳", "🔄")
 
 
 def _split(text: str):
@@ -97,30 +121,28 @@ def _in_coalition(message) -> bool:
 
 
 def _is_peer(message) -> bool:
-    """The coalition peer bot (Kimi/SERVITOR) inside the coalition scope."""
     return bool(message.author.bot and _in_coalition(message)
                 and (not _PEER_BOT_ID or str(message.author.id) == _PEER_BOT_ID))
 
 
-# Markers that flag a peer message as status / housekeeping (a progress bar, a
-# "Thinking…" placeholder, a Hermes self-improvement notice) rather than an
-# actual answer to you. We never burn a second opinion on these.
-_STATUS_MARKERS = ("Thinking", "thinking", "Self-improvement", "review:", "💾", "⚕", "⏳", "🔄")
-
-
 def _is_settled(text: str) -> bool:
-    """True only when the peer's message looks like a FINAL answer — not a progress
-    placeholder, not a half-streamed partial, and not Hermes housekeeping spam."""
     t = (text or "").strip()
     if not t:
         return False
-    if any(m in t for m in _STATUS_MARKERS):   # placeholder / status / housekeeping
+    if any(m in t for m in _STATUS_MARKERS):
         return False
-    if t.endswith("▉") or t.endswith("█") or t.endswith("…"):  # streaming cursor
+    if t.endswith("▉") or t.endswith("█") or t.endswith("…"):
         return False
-    if len(t) < 15:                            # too short to be a real answer yet
+    if len(t) < 15:
         return False
     return True
+
+
+def _write_model_override(provider: str, model: str) -> None:
+    """Persist a runtime brain switch so it survives the reboot /model triggers."""
+    lines = [f"VADER_PROVIDER={provider}"]
+    lines.append(f"VADER_CLAUDE_MODEL={model}" if provider == "claude" else f"VADER_MODEL={model}")
+    _OVERRIDE_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def main() -> None:
@@ -135,18 +157,22 @@ def main() -> None:
     intents = discord.Intents.default()
     intents.message_content = True
     client = discord.Client(intents=intents)
+    tree = discord.app_commands.CommandTree(client)
 
-    _last_op = {"t": 0.0}      # cooldown net for second-opinions
-    _debounce: dict = {}        # peer message id -> pending settle task
-    _restart = {"requested": False}  # /restart sets this → exit 42 → supervisor relaunches
+    _last_op = {"t": 0.0}
+    _debounce: dict = {}
+    _restart = {"requested": False}
 
+    def _is_operator(user_id) -> bool:
+        return (not _ALLOWED_UID) or str(user_id) == _ALLOWED_UID
+
+    # ── Coalition second-opinion (unchanged behaviour) ──
     async def _do_second_opinion(peer_message, kimi_said: str) -> None:
         now = time.monotonic()
         if now - _last_op["t"] < 8:
             log.info("second-opinion skipped (cooldown)")
             return
         _last_op["t"] = now
-        # The operator's most recent message here — what the peer answered.
         question = ""
         async for m in peer_message.channel.history(limit=12, before=peer_message):
             if (not m.author.bot) and (not _ALLOWED_UID or str(m.author.id) == _ALLOWED_UID):
@@ -169,8 +195,6 @@ def main() -> None:
         log.info("second-opinion posted")
 
     async def _schedule(peer_message) -> None:
-        """(Re)start the settle timer for this peer message. Every create/edit
-        cancels the prior timer, so we only fire once the peer STOPS editing."""
         mid = peer_message.id
         old = _debounce.get(mid)
         if old:
@@ -179,16 +203,15 @@ def main() -> None:
         async def _settle():
             try:
                 await asyncio.sleep(_SETTLE_SECONDS)
-                # Re-fetch the message to get its final, fully-streamed content.
                 fresh = await peer_message.channel.fetch_message(mid)
                 content = (fresh.content or "").strip()
                 if not _is_settled(content):
-                    log.info("peer msg %s not settled (placeholder/partial) — skipping", mid)
+                    log.info("peer msg %s not settled — skipping", mid)
                     return
                 log.info("peer msg %s settled — firing second opinion", mid)
                 await _do_second_opinion(fresh, content)
             except asyncio.CancelledError:
-                pass  # superseded by a newer edit — expected
+                pass
             except Exception as e:
                 log.error("settle/fire failed: %s", e)
             finally:
@@ -196,16 +219,83 @@ def main() -> None:
 
         _debounce[mid] = asyncio.create_task(_settle())
 
+    async def _trigger_restart() -> None:
+        _restart["requested"] = True
+        log.info("restart requested by operator")
+        await client.close()
+
+    # ── Native slash commands ──
+    @tree.command(name="help", description="List VADER's commands and what they do")
+    async def _cmd_help(interaction):
+        await interaction.response.send_message(_HELP, ephemeral=True)
+
+    @tree.command(name="reset", description="Clear VADER's conversation memory")
+    async def _cmd_reset(interaction):
+        if not _is_operator(interaction.user.id):
+            return await interaction.response.send_message("Not authorised.", ephemeral=True)
+        agent.reset()
+        log.info("conversation reset (slash)")
+        await interaction.response.send_message("— conversation cleared —")
+
+    @tree.command(name="restart", description="Reboot the VADER gateway")
+    async def _cmd_restart(interaction):
+        if not _is_operator(interaction.user.id):
+            return await interaction.response.send_message("Not authorised.", ephemeral=True)
+        await interaction.response.send_message("♻ restarting gateway — back in a few seconds…")
+        await _trigger_restart()
+
+    @tree.command(name="model", description="Switch VADER's brain and reboot (opus|sonnet|haiku|kimi)")
+    @discord.app_commands.describe(name="opus, sonnet, haiku, or kimi")
+    async def _cmd_model(interaction, name: str):
+        if not _is_operator(interaction.user.id):
+            return await interaction.response.send_message("Not authorised.", ephemeral=True)
+        key = name.strip().lower()
+        if key not in _MODEL_ALIASES:
+            return await interaction.response.send_message(
+                f"Unknown brain '{name}'. Use: opus, sonnet, haiku, kimi.", ephemeral=True)
+        provider, model = _MODEL_ALIASES[key]
+        _write_model_override(provider, model)
+        log.info("model switch -> %s (%s) — rebooting", key, model)
+        await interaction.response.send_message(f"♻ switching to **{key}** and rebooting…")
+        await _trigger_restart()
+
+    @tree.command(name="plan", description="Two-model planning council (Claude + Kimi)")
+    @discord.app_commands.describe(task="what to plan")
+    async def _cmd_plan(interaction, task: str):
+        if not _is_operator(interaction.user.id):
+            return await interaction.response.send_message("Not authorised.", ephemeral=True)
+        await interaction.response.defer(thinking=True)  # council takes well over 3s
+        log.info("council (slash): %r", task[:60])
+        try:
+            blocks = await asyncio.to_thread(lambda: list(run_council(task)))
+        except Exception as e:
+            log.error("council failed: %s", e)
+            return await interaction.followup.send(f"council error: {e}")
+        heads = {"claude": "🟥 CLAUDE", "kimi": "🟩 KIMI", "synthesis": "🟨 SYNTHESIS"}
+        await interaction.followup.send("— planning council: two minds, one task —")
+        for label, text in blocks:
+            for chunk in _split(f"**{heads.get(label, label.upper())}**\n{text}"):
+                await interaction.followup.send(chunk)
+        log.info("council posted (slash)")
+
     @client.event
     async def on_ready():
         log.info("VADER online as %s | UID=%s", client.user, _ALLOWED_UID or "anyone")
+        # Register the slash commands per-guild (instant, vs slow global propagation).
+        try:
+            n = 0
+            for g in client.guilds:
+                tree.copy_global_to(guild=g)
+                await tree.sync(guild=g)
+                n += 1
+            log.info("slash commands synced to %d guild(s)", n)
+        except Exception as e:
+            log.error("slash sync failed: %s", e)
         if os.environ.get("VADER_GATEWAY_TEST"):
             await client.close()
 
     @client.event
     async def on_message_edit(before, after):
-        # Peer streams by editing — re-arm the settle timer on each edit so we
-        # read the FINAL text, not the partial.
         if _is_peer(after):
             log.info("peer edit %s — re-arming settle timer", after.id)
             await _schedule(after)
@@ -214,75 +304,60 @@ def main() -> None:
     async def on_message(message):
         if client.user and message.author.id == client.user.id:
             return
-
         is_bot = message.author.bot
         guild_id = str(message.guild.id) if message.guild else "-"
         chan_id = str(message.channel.id)
         content = (message.content or "").strip()
         log.info("msg from %s bot=%s guild=%s ch=%s: %r", message.author, is_bot, guild_id, chan_id, content[:80])
 
-        # ── Coalition peer → schedule a settled second opinion (don't fire now). ──
         if _is_peer(message):
             log.info("peer create %s — arming settle timer", message.id)
             await _schedule(message)
             return
         if is_bot:
-            log.info("ignoring bot %s (not coalition peer / out of scope)", message.author)
             return
 
-        # ── Human message. ──
         if _ALLOWED_UID and str(message.author.id) != _ALLOWED_UID:
-            log.info("ignoring non-operator %s", message.author)
             return
         if _ALLOWED_CHANNELS and chan_id not in _ALLOWED_CHANNELS:
-            log.info("ignoring channel %s (not in allow-list)", chan_id)
             return
         if not content:
             return
 
+        # Text-command fallbacks (so they work even before slash commands sync).
         if content == "/reset":
             agent.reset()
             await message.channel.send("— conversation cleared —")
-            log.info("conversation reset")
             return
-
-        # /restart → exit 42 so the supervisor (gateway.ps1) relaunches a fresh
-        # process: picks up .env / model / code changes, reconnects after a brief
-        # blip. Lets you reboot VADER from your phone (e.g. after switching models
-        # or having Kimi patch a config).
         if content == "/restart":
-            _restart["requested"] = True
-            log.info("restart requested by operator")
             await message.channel.send("♻ restarting gateway — back in a few seconds…")
-            await client.close()
+            await _trigger_restart()
             return
-
+        if content == "/help":
+            await message.channel.send(_HELP)
+            return
         if content.startswith("/plan "):
             task = content[len("/plan "):].strip()
-            log.info("council: /plan %r", task[:60])
             await message.channel.send("— planning council: two minds, one task —")
             try:
                 blocks = await asyncio.to_thread(lambda: list(run_council(task)))
             except Exception as e:
-                log.error("council failed: %s", e)
                 await message.channel.send(f"council error: {e}")
                 return
             heads = {"claude": "🟥 CLAUDE", "kimi": "🟩 KIMI", "synthesis": "🟨 SYNTHESIS"}
             for label, text in blocks:
                 for chunk in _split(f"**{heads.get(label, label.upper())}**\n{text}"):
                     await message.channel.send(chunk)
-            log.info("council posted")
             return
 
+        # Normal chat.
         log.info("answering operator")
         async with message.channel.typing():
             reply = await asyncio.to_thread(_run_turn, agent, content)
         for chunk in _split(reply):
             await message.channel.send(chunk)
 
-
     client.run(_TOKEN)
-    # If /restart asked for it, exit 42 so the supervisor loop relaunches us.
     if _restart["requested"]:
         log.info("exiting (code 42) for supervisor restart")
         raise SystemExit(42)

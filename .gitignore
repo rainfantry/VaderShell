@@ -2,5 +2,6 @@
 __pycache__/
 *.pyc
 .env
+runtime_override.env
 Screenshot*.png
 *.log

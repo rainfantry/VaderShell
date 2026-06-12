@@ -37,7 +37,17 @@ Discord gateway (stays running, listens to your server):
 ```
 .\gateway.ps1
 ```
-In Discord the gateway takes `/plan <task>`, `/reset`, and `/restart`. `/restart` reboots the gateway — it's **supervised**, so it reconnects in a few seconds, and crashes auto-recover (up to 5×). That means you can reboot the bot from your phone, even away from the machine.
+In Discord, VADER registers **native slash commands** (the `/` picker, shown under its own name):
+
+| Command | What it does |
+|---|---|
+| `/help` | List the commands and what they do |
+| `/plan <task>` | Two-model planning council (Claude + Kimi + a synthesis) |
+| `/model <opus\|sonnet\|haiku\|kimi>` | Switch VADER's brain and reboot onto it |
+| `/reset` | Clear VADER's conversation memory |
+| `/restart` | Reboot the gateway (reconnects in a few seconds) |
+
+`/restart` reboots a **supervised** process, so it reconnects in seconds and crashes auto-recover (up to 5×) — you can reboot the bot from your phone, away from the machine. `/model` writes a runtime override and reboots onto the new brain (handy if a model's quota runs dry mid-task). The same commands also work typed as plain text, as a fallback before the slash commands sync.
 
 Tip: add `function vader { & 'C:\path\to\VaderShell\22div.ps1' }` to your PowerShell profile for a one-word launch.
 
@@ -76,7 +86,7 @@ SYNTHESIS:  <agree / differ / recommendation>
 1. **https://discord.com/developers/applications** → **New Application** → name it.
 2. **Bot** tab → **Reset Token** → copy it into `.env` as `DISCORD_BOT_TOKEN`.
 3. Same tab → **Privileged Gateway Intents** → enable **MESSAGE CONTENT INTENT** (required to read messages).
-4. **OAuth2 → URL Generator** → scope **`bot`**; bot permissions **View Channels, Send Messages, Read Message History**. Open the generated URL and add the bot to your server.
+4. **OAuth2 → URL Generator** → scopes **`bot`** *and* **`applications.commands`** (the second is required for native slash commands); bot permissions **View Channels, Send Messages, Read Message History**. Open the generated URL and add the bot to your server. *(If you added the bot before with only `bot`, re-open this URL with both scopes ticked to enable slash commands — no need to kick it first.)*
 5. *(Optional, recommended)* Lock the bot to yourself: set `VADER_DISCORD_UID` to your Discord user ID (Developer Mode → right-click your name → Copy User ID).
 6. Run `.\gateway.ps1` and message the bot in your server — it answers with full Claude + tools.
 
