@@ -45,6 +45,24 @@ Edit `.env` → `VADER_PROVIDER`:
 | `kimi` | Kimi (set `KIMI_API_KEY`) |
 | `openrouter` | any model via OpenRouter (set `OPENROUTER_API_KEY` + `VADER_MODEL`) |
 
+## Planning council (`/plan`)
+
+Two models are better than one at catching flaws in a *plan*. `/plan <task>` runs a **bounded** deliberation:
+
+1. **Claude** proposes an approach (plan only, no code).
+2. **Kimi** plans the same task independently — a second opinion via OpenRouter.
+3. **Claude** compares both: where they agree, where they clash, and what to do.
+
+Bounded by design — each model speaks once, Claude compares once, then it stops and waits for you. No model-to-model loop, no runaway cost. You read both sides and decide. (Needs `OPENROUTER_API_KEY` for the Kimi half.)
+
+```
+you › /plan a single-file python script that counts lines in a text file
+— planning council: two minds, one task —
+CLAUDE:     <approach · risks · steps>
+KIMI:       <approach · risks · steps>
+SYNTHESIS:  <agree / differ / recommendation>
+```
+
 ## Discord bot setup
 
 1. **https://discord.com/developers/applications** → **New Application** → name it.

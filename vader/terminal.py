@@ -14,10 +14,12 @@ from dotenv import load_dotenv
 # rich's Console gives us styled prompts and output.
 from rich.console import Console
 
-# Our own pieces: the banner art, the auth resolver, and the agent engine.
+# Our own pieces: the banner art, the auth resolver, the agent engine, and the
+# two-model planning council.
 from . import banner
 from .auth import resolve
 from .core import Agent
+from .council import run_council
 
 # One shared Console for the whole session.
 _console = Console()
@@ -68,6 +70,24 @@ def main() -> None:
         if user == "/reset":
             agent.reset()
             _console.print("[dim]— conversation cleared —[/]\n")
+            continue
+        # /plan <task> → convene the council: Claude's plan, Kimi's plan, and
+        # Claude comparing the two. One bounded round, then it waits for you.
+        if user.startswith("/plan "):
+            task = user[len("/plan "):].strip()
+            _console.print("[bold]— planning council: two minds, one task —[/]\n")
+            _labels = {"claude": ("CLAUDE", "#E24B4A"),
+                       "kimi": ("KIMI", "#63991F"),
+                       "synthesis": ("SYNTHESIS", "#FFC400")}
+            try:
+                for label, text in run_council(task):
+                    name, colour = _labels.get(label, (label.upper(), ""))
+                    _console.print(name + ":", style=f"bold {colour}", highlight=False)
+                    _console.print(text, markup=False, highlight=False)
+                    _console.print()
+            except Exception as e:
+                _console.print(f"[bold red]council error:[/] {e}")
+            _console.print("[dim]Two sides on the table — your call. Give a task to build, or refine.[/]\n")
             continue
 
         # Stream the agent's work: thinking, each tool call + result, and the
