@@ -138,6 +138,7 @@ def main() -> None:
 
     _last_op = {"t": 0.0}      # cooldown net for second-opinions
     _debounce: dict = {}        # peer message id -> pending settle task
+    _restart = {"requested": False}  # /restart sets this → exit 42 → supervisor relaunches
 
     async def _do_second_opinion(peer_message, kimi_said: str) -> None:
         now = time.monotonic()
@@ -245,6 +246,17 @@ def main() -> None:
             log.info("conversation reset")
             return
 
+        # /restart → exit 42 so the supervisor (gateway.ps1) relaunches a fresh
+        # process: picks up .env / model / code changes, reconnects after a brief
+        # blip. Lets you reboot VADER from your phone (e.g. after switching models
+        # or having Kimi patch a config).
+        if content == "/restart":
+            _restart["requested"] = True
+            log.info("restart requested by operator")
+            await message.channel.send("♻ restarting gateway — back in a few seconds…")
+            await client.close()
+            return
+
         if content.startswith("/plan "):
             task = content[len("/plan "):].strip()
             log.info("council: /plan %r", task[:60])
@@ -270,6 +282,10 @@ def main() -> None:
 
 
     client.run(_TOKEN)
+    # If /restart asked for it, exit 42 so the supervisor loop relaunches us.
+    if _restart["requested"]:
+        log.info("exiting (code 42) for supervisor restart")
+        raise SystemExit(42)
 
 
 if __name__ == "__main__":

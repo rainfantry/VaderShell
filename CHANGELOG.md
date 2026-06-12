@@ -29,6 +29,9 @@ tells the story of how it came together, and why each piece exists.
 - `vader-gateway` exposes the same brain as a Discord bot — delegate from your phone.
 - Locked to the operator's user ID; ignores other bots by default; splits long
   replies under Discord's 2000-char limit.
+- In-chat commands: `/plan`, `/reset`, `/restart`. The launcher **supervises** the
+  process — `/restart` reboots it (reconnects in seconds) and crashes auto-recover,
+  so you can reboot it from your phone even away from the machine.
 
 ### Planning council — `/plan`
 - A **bounded** two-model deliberation: Claude plans, Kimi plans (independent second

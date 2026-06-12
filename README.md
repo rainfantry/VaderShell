@@ -37,6 +37,8 @@ Discord gateway (stays running, listens to your server):
 ```
 .\gateway.ps1
 ```
+In Discord the gateway takes `/plan <task>`, `/reset`, and `/restart`. `/restart` reboots the gateway — it's **supervised**, so it reconnects in a few seconds, and crashes auto-recover (up to 5×). That means you can reboot the bot from your phone, even away from the machine.
+
 Tip: add `function vader { & 'C:\path\to\VaderShell\22div.ps1' }` to your PowerShell profile for a one-word launch.
 
 ## Switch brains

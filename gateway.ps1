@@ -1,7 +1,23 @@
-# VaderShell — Discord gateway launcher. Stays running and listens; Ctrl-C to stop.
+# VaderShell — Discord gateway launcher + supervisor.
+#
+# Loops so the gateway can reboot itself:
+#   /restart in Discord -> gateway exits 42 -> relaunch (reconnects in a few seconds)
+#   a crash (other exit) -> auto-relaunch, up to 5 times, with a short backoff
+#   a clean exit (0)      -> stop
+# So you can reboot the bot from your phone, even away from the machine.
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $env:PYTHONPATH = $root
-# Gateway (phone) runs on Sonnet — lighter, and on most plans a separate quota.
-# The terminal stays on Opus (its default) for heavier work at the machine.
+# Gateway runs on Sonnet (lighter; a separate quota on most plans).
 $env:VADER_CLAUDE_MODEL = "claude-sonnet-4-6"
-& "$root\.venv\Scripts\python.exe" -m vader.gateway_discord
+
+$crashes = 0
+while ($true) {
+    & "$root\.venv\Scripts\python.exe" -m vader.gateway_discord
+    $code = $LASTEXITCODE
+    if ($code -eq 42) { Write-Host "[supervisor] /restart -> relaunching..."; $crashes = 0; continue }
+    if ($code -eq 0)  { Write-Host "[supervisor] clean exit -> stopping."; break }
+    $crashes++
+    if ($crashes -ge 5) { Write-Host "[supervisor] too many crashes ($crashes) -> stopping."; break }
+    Write-Host "[supervisor] gateway exited ($code) -> relaunching in 3s (crash $crashes/5)..."
+    Start-Sleep -Seconds 3
+}
