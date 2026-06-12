@@ -8,6 +8,10 @@ The Claude path drives the *real* `claude` binary, so it inherits your logged-in
 
 ![VaderShell answering in Discord](docs/discord.png)
 
+VADER reading a second bot and firing a second opinion in a shared channel:
+
+![VADER second-opinion on a peer bot](docs/coalition.png)
+
 ## Why it works
 
 Most "use my Claude subscription in my own app" attempts hand-roll an API call with an OAuth token — which Anthropic rate-limits hard (instant 429s, even when your plan is barely used). VaderShell sidesteps that entirely: it **shells out to the real `claude` CLI** you're already logged into, inheriting the exact auth that works in your terminal — full tools, your memory and skills, your subscription's allowance — with nothing to fake.
