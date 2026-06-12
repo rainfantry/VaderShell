@@ -171,11 +171,10 @@ def resolve() -> AgentConfig:
     provider = os.environ.get("VADER_PROVIDER", "claude").strip().lower()
 
     if provider in ("claude", "claude-api"):
-        # Only honour VADER_MODEL for Claude if it's actually a Claude model, so a
-        # leftover kimi/openrouter model in .env doesn't break the switch back to
-        # Claude (it just falls back to the default Opus model instead).
-        requested = os.environ.get("VADER_MODEL", "").strip()
-        model = requested if requested.startswith("claude") else DEFAULT_CLAUDE_MODEL
+        # The Claude model has its OWN setting (VADER_CLAUDE_MODEL) so it never
+        # collides with VADER_MODEL (which is for the kimi/openrouter side).
+        # Defaults to Opus; the gateway launcher sets Sonnet for lighter phone use.
+        model = os.environ.get("VADER_CLAUDE_MODEL", "").strip() or DEFAULT_CLAUDE_MODEL
         # "claude"     → drive the REAL `claude` CLI (uses your working Claude Code
         #                login; no token, no 429s). The reliable path.
         # "claude-api" → hand-rolled API call with an OAuth/API token. Kept as an

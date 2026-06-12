@@ -61,8 +61,16 @@ def _ask_claude(prompt: str) -> str:
     """
     # Build and run the command, capturing its text output. encoding='utf-8'
     # so any em-dashes / unicode in the reply decode correctly on Windows.
+    # Use the configured Claude model (the gateway sets Sonnet; the terminal
+    # defaults to Opus). Lets the phone council run lighter than the desk one.
+    model = os.environ.get("VADER_CLAUDE_MODEL", "").strip() or "claude-opus-4-8"
+    # --dangerously-skip-permissions gives the council the SAME full kit as VADER's
+    # individual channel: web search, bash, file tools, and your skills (loaded from
+    # the home dir below). So it can actually go verify a claim or use a skill —
+    # not just reason in a vacuum. Costs more + slower (it may take agentic steps).
     result = subprocess.run(
-        ["claude", "-p", "--output-format", "text", prompt],
+        ["claude", "-p", "--output-format", "text", "--model", model,
+         "--dangerously-skip-permissions", prompt],
         capture_output=True,
         text=True,
         encoding="utf-8",

@@ -59,6 +59,8 @@ Two models are better than one at catching flaws in a *plan*. `/plan <task>` run
 
 Bounded by design — each model speaks once, Claude compares once, then it stops and waits for you. No model-to-model loop, no runaway cost. You read both sides and decide. (Needs `OPENROUTER_API_KEY` for the Kimi half.)
 
+The council runs with full tools and your skills, so Claude can **web-search to verify** a plan — checking claims, not just reasoning about them.
+
 ```
 you › /plan a single-file python script that counts lines in a text file
 — planning council: two minds, one task —
@@ -75,6 +77,22 @@ SYNTHESIS:  <agree / differ / recommendation>
 4. **OAuth2 → URL Generator** → scope **`bot`**; bot permissions **View Channels, Send Messages, Read Message History**. Open the generated URL and add the bot to your server.
 5. *(Optional, recommended)* Lock the bot to yourself: set `VADER_DISCORD_UID` to your Discord user ID (Developer Mode → right-click your name → Copy User ID).
 6. Run `.\gateway.ps1` and message the bot in your server — it answers with full Claude + tools.
+
+## Coalition mode (optional)
+
+Point VADER at a server (or channel) where a *second* bot also answers you, and it reads that bot's replies and posts a second opinion:
+
+- One-directional — VADER reads the peer; the peer never sees VADER — so it **can't loop**.
+- VADER waits for the peer to finish streaming (debounce), then reads the **final** message — skipping `Thinking…` placeholders and status/housekeeping spam.
+- A cooldown is the backup against runaway.
+
+Set `VADER_COALITION_SERVER_ID` (and optionally `VADER_PEER_BOT_ID`). The peer bot **must ignore bots**, or the one-way guarantee breaks.
+
+## Models & quota
+
+- **Terminal → Opus** (the heavy brain — use it at the machine).
+- **Gateway → Sonnet** — the launcher sets `VADER_CLAUDE_MODEL=claude-sonnet-4-6`. Lighter for phone use, and on most plans Sonnet draws on a separate quota, sparing the Opus budget.
+- Override per surface with `VADER_CLAUDE_MODEL`.
 
 ## A note on the `claude-api` provider
 
