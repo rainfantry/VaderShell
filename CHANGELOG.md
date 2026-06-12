@@ -21,6 +21,12 @@ tells the story of how it came together, and why each piece exists.
   model's quota runs dry mid-task, without touching the machine. The override is
   loaded over base config at startup and wins over the launcher's default.
 
+### Setup & docs
+- `setup.ps1` — one-step install: creates the venv, installs deps, copies
+  `.env.example` → `.env`, and checks for Python and the `claude` CLI.
+- `.env.example` now documents **every** variable the code reads, grouped by purpose
+  (brain selection, keys, Discord, coalition, advanced overrides).
+
 ## 0.1.0 — first release
 
 ### The core idea

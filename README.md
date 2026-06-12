@@ -19,13 +19,12 @@ Most "use my Claude subscription in my own app" attempts hand-roll an API call w
 ## Install
 
 1. Clone this repo.
-2. Python 3.11+:
+2. One-step setup (Windows PowerShell) — creates the venv, installs deps, copies `.env.example` → `.env`:
    ```
-   python -m venv .venv
-   .venv\Scripts\python -m pip install -r requirements.txt
+   .\setup.ps1
    ```
 3. Install **Claude Code** and log in (`claude`, then `/login` → your subscription). The default `claude` provider drives this CLI.
-4. `copy .env.example .env` and fill in what you need (the `claude` path needs nothing).
+4. Edit `.env` with your values (the `claude` path needs nothing; the Discord gateway needs a bot token).
 
 ## Run
 
