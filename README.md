@@ -102,7 +102,7 @@ Set `VADER_COALITION_SERVER_ID` (and optionally `VADER_PEER_BOT_ID`). The peer b
 ## Models & quota
 
 - **Terminal → Opus** (the heavy brain — use it at the machine).
-- **Gateway → Sonnet** — the launcher sets `VADER_CLAUDE_MODEL=claude-sonnet-4-6`. Lighter for phone use, and on most plans Sonnet draws on a separate quota, sparing the Opus budget.
+- **Gateway → Opus 4.7** — the launcher sets `VADER_CLAUDE_MODEL=claude-opus-4-7`. Legacy Opus for phone use.
 - Override per surface with `VADER_CLAUDE_MODEL`.
 
 ## A note on the `claude-api` provider

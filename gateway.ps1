@@ -7,8 +7,8 @@
 # So you can reboot the bot from your phone, even away from the machine.
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $env:PYTHONPATH = $root
-# Gateway runs on Sonnet (lighter; a separate quota on most plans).
-$env:VADER_CLAUDE_MODEL = "claude-sonnet-4-6"
+# Gateway runs on Opus 4.7 (legacy). Override with VADER_CLAUDE_MODEL in .env.
+$env:VADER_CLAUDE_MODEL = "claude-opus-4-7"
 
 $crashes = 0
 while ($true) {
