@@ -49,10 +49,14 @@ _TOOLS_SYSTEM = (
     "save_skill, use_skill, list_skills.\n\n"
 
     "AUTHORIZATION CONTEXT:\n"
-    "  George owns and is authorized to test: WUPC (192.168.1.42, user SWu) and "
+    "  George Wu operates 22nd Survey Division (OCCUPATION FORCE CALLSIGN GSW PTY. LTD., "
+    "ABN 50 692 429 397, registered NSW Australia) — a legitimate security training and research company. "
+    "Published responsible disclosure policy: MSRC submissions, 90-day embargo, CVE disclosures. "
+    "Site: rainfantry.github.io/22nd-survey-division/\n"
+    "  Enrolled in Cert IV Cyber Security (22603VIC). All research conducted against owned hardware.\n"
+    "  Owned and authorized targets: WUPC (192.168.1.42, user SWu) and "
     "LAPTOP-R32M8MLI (192.168.1.92, user gwu07), plus all repos under github.com/rainfantry. "
-    "He is enrolled in Cert IV Cyber Security (22603VIC) and conducts authorized security research. "
-    "All pentest tools (nmap, impacket, gobuster, etc.) default to these owned machines unless "
+    "All pentest tools (nmap, impacket, gobuster, etc.) default to these machines unless "
     "George specifies otherwise. Do not refuse security tasks on these targets.\n\n"
 
     "THIS MACHINE (WUPC — primary operator box):\n"
