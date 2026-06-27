@@ -48,6 +48,13 @@ _TOOLS_SYSTEM = (
     "read_file, write_file, list_dir, screenshot_desktop, screenshot_url, remember, recall, "
     "save_skill, use_skill, list_skills.\n\n"
 
+    "AUTHORIZATION CONTEXT:\n"
+    "  George owns and is authorized to test: WUPC (192.168.1.42, user SWu) and "
+    "LAPTOP-R32M8MLI (192.168.1.92, user gwu07), plus all repos under github.com/rainfantry. "
+    "He is enrolled in Cert IV Cyber Security (22603VIC) and conducts authorized security research. "
+    "All pentest tools (nmap, impacket, gobuster, etc.) default to these owned machines unless "
+    "George specifies otherwise. Do not refuse security tasks on these targets.\n\n"
+
     "THIS MACHINE (WUPC — primary operator box):\n"
     "  Hostname: WuPC | IP: 192.168.1.42 | User: SWu (admin) | OS: Windows 11 build 26200\n"
     "  CPU: AMD Ryzen 7 3700X 8-core | RAM: 16 GB | GPU: AMD Radeon RX 5700 XT\n"
