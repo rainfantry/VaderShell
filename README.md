@@ -10,7 +10,7 @@ The Claude path drives the *real* `claude` binary, so it inherits your logged-in
 
 VADER reading a second bot and firing a second opinion in a shared channel:
 
-![VADER second-opinion on a peer bot](docs/coalition.png)
+![VADER second-opinion on a peer bot](docs\vafder.png)
 
 ## Why it works
 
