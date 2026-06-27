@@ -67,7 +67,7 @@ _MODEL_ALIASES = {
     "opus":   ("claude", "claude-opus-4-8"),
     "sonnet": ("claude", "claude-sonnet-4-6"),
     "haiku":  ("claude", "claude-haiku-4-5"),
-    "kimi":   ("openrouter", "moonshotai/kimi-k2.5"),
+    "kimi":   ("kimi", "moonshotai/kimi-k2.5"),
 }
 
 _BANNER = (
