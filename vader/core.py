@@ -304,6 +304,10 @@ class Agent:
                 else ["--session-id", self._cli_session_id])
         cmd.append(user_text)
 
+        # Strip CLAUDECODE so the CLI doesn't refuse to run as a "nested session"
+        # when the gateway is spawned from within another Claude Code process.
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+
         # Popen (not run) so we can read events as they stream in, live.
         proc = subprocess.Popen(
             cmd,
@@ -314,6 +318,7 @@ class Agent:
             errors="replace",
             bufsize=1,
             cwd=os.path.expanduser("~"),  # load your CLAUDE.md + memory + skills
+            env=env,
         )
         self._cli_started = True
 
