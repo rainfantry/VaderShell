@@ -3,6 +3,35 @@
 All notable changes to VaderShell. Built ground-up in a single session — this log
 tells the story of how it came together, and why each piece exists.
 
+## 0.3.0 — tools for the Kimi/OpenRouter brain
+
+Until now only the **claude** brain could act (it shells out to the real `claude`
+CLI, which has full tools). The kimi/openrouter path was a plain chat — a mouth with
+no hands. That defeats the point of a gateway. This release gives those brains a real
+tool belt, so VADER can actually *do* things on any brain.
+
+### Tool belt (`vader/tools.py`)
+- **`run_terminal`** — run shell commands (PowerShell / cmd / bash) and get exit code,
+  stdout and stderr. This is the workhorse: `gh` CLI, `git` clone/commit/push (private
+  repos via the machine's logged-in auth), `npm`/`dotnet`/`python` build & run, installs
+  — all of it is just a command. Runs in the home directory, inheriting the real env.
+- **`web_search`** — DuckDuckGo search (no API key) → titles, URLs, snippets.
+- **`fetch_url`** — fetch a page and return its readable text (tags stripped).
+- **`read_file` / `write_file` / `list_dir`** — file I/O, paths resolving from home.
+- Output is capped per call so a chatty command can't blow the model's context.
+
+### Agent loop (`vader/core.py`)
+- The OpenAI-compatible path (Kimi/OpenRouter) is now a **tool-using agent**: ask the
+  model → if it calls tools, run them and feed the results back → repeat until it
+  answers with no more calls (bounded at 16 rounds). It streams `tool` / `tool_result`
+  / `text` events, so you watch it act live in both the terminal and Discord — exactly
+  like the claude path.
+- The brain is told what it can reach (tools, the machine, the inherited auth) via an
+  added system block, and steered to verify its work by actually running it.
+
+### Deps
+- Added `ddgs` (maintained DuckDuckGo search client) for `web_search`.
+
 ## 0.2.0 — native slash commands
 
 ### Slash commands (the `/` picker)
