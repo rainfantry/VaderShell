@@ -43,6 +43,13 @@ for _d in (WORKSPACE, _SHOTS):
 _MAX_OUT = 12000         # chars of a tool result fed back to the model
 _DEFAULT_TIMEOUT = 300   # seconds before a command is killed (builds are slow)
 
+# Default SSH peer (the other machine + its gateway). Read from .env; ssh_run can
+# also be given a one-off host. BatchMode keeps it non-interactive (key auth only).
+_SSH_HOST = os.environ.get("VADER_SSH_HOST", "").strip()
+_SSH_USER = os.environ.get("VADER_SSH_USER", "").strip()
+_SSH_PORT = os.environ.get("VADER_SSH_PORT", "22").strip() or "22"
+_SSH_KEY = os.environ.get("VADER_SSH_KEY", "").strip()
+
 
 def _clip(text: str, limit: int = _MAX_OUT) -> str:
     text = text or ""
@@ -88,6 +95,51 @@ def run_terminal(command: str, shell: str = "powershell", timeout: int = _DEFAUL
     out = (proc.stdout or "").strip()
     err = (proc.stderr or "").strip()
     parts = [f"exit code: {proc.returncode}"]
+    if out:
+        parts.append("stdout:\n" + out)
+    if err:
+        parts.append("stderr:\n" + err)
+    if not out and not err:
+        parts.append("(no output)")
+    return _clip("\n".join(parts))
+
+
+# ── Tool: ssh_run (reach the other machine / its gateway) ─────────────────
+def ssh_run(command: str, host: str = "", timeout: int = _DEFAULT_TIMEOUT) -> str:
+    """Run a command on the peer machine over SSH and return exit code + output.
+
+    Uses key auth only (BatchMode) so it never hangs on a password prompt. Host,
+    user, port and key default to the VADER_SSH_* env vars; `host` overrides the
+    target for a one-off. This is how VADER's two gateways operate each other's box.
+    """
+    if not command or not command.strip():
+        return "ERROR: empty command."
+    target = (host or _SSH_HOST).strip()
+    if not target:
+        return ("ERROR: no SSH host. Set VADER_SSH_HOST in .env (e.g. 192.168.1.92) "
+                "or pass host=...")
+    dest = f"{_SSH_USER}@{target}" if _SSH_USER else target
+    try:
+        timeout = int(timeout) or _DEFAULT_TIMEOUT
+    except (TypeError, ValueError):
+        timeout = _DEFAULT_TIMEOUT
+    argv = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
+            "-o", "StrictHostKeyChecking=accept-new", "-p", _SSH_PORT]
+    if _SSH_KEY:
+        argv += ["-i", os.path.expanduser(_SSH_KEY)]
+    argv += [dest, command]
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=timeout)
+    except FileNotFoundError:
+        return "ERROR: ssh client not found on PATH."
+    except subprocess.TimeoutExpired:
+        return f"ERROR: ssh timed out after {timeout}s (is {target} powered on and reachable?)."
+    except Exception as e:  # noqa: BLE001
+        return f"ERROR: {e}"
+    out = (r.stdout or "").strip()
+    err = (r.stderr or "").strip()
+    parts = [f"[{dest}] exit code: {r.returncode}"]
     if out:
         parts.append("stdout:\n" + out)
     if err:
@@ -403,6 +455,7 @@ def skills_index() -> str:
 # name → callable
 _HANDLERS = {
     "run_terminal": run_terminal,
+    "ssh_run": ssh_run,
     "web_search": web_search,
     "fetch_url": fetch_url,
     "read_file": read_file,
@@ -439,6 +492,26 @@ SCHEMAS = [
                     "shell": {"type": "string", "enum": ["powershell", "cmd", "bash"],
                               "description": "Which shell. Default powershell; use cmd for python/node, bash for POSIX."},
                     "timeout": {"type": "integer", "description": "Seconds before kill (default 120)."},
+                },
+                "required": ["command"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ssh_run",
+            "description": ("Run a command on the PEER machine over SSH (key auth). Use to operate "
+                            "the other box / its VADER gateway — check status, pull a repo, kick off a "
+                            "build, sync. Host/user/port/key come from VADER_SSH_* env; pass host to "
+                            "override. NOTE: the remote runs in its DEFAULT shell (cmd.exe on Windows) — "
+                            "chain commands with '&' not ';', or wrap in 'powershell -NoProfile -Command \"...\"'."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "description": "Command to run on the remote host."},
+                    "host": {"type": "string", "description": "Optional one-off host (default VADER_SSH_HOST)."},
+                    "timeout": {"type": "integer", "description": "Seconds before kill (default 300)."},
                 },
                 "required": ["command"],
             },

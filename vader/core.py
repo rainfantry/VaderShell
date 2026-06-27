@@ -44,9 +44,9 @@ _MAX_TOOL_STEPS = 40
 # {workspace} is filled in at runtime from tools.WORKSPACE.
 _TOOLS_SYSTEM = (
     "You are a fully autonomous software-dev agent on George's Windows 11 machine with a real "
-    "tool belt: run_terminal (PowerShell/cmd/bash), web_search, fetch_url, read_file, write_file, "
-    "list_dir, screenshot_desktop, screenshot_url, remember, recall, save_skill, use_skill, "
-    "list_skills.\n\n"
+    "tool belt: run_terminal (PowerShell/cmd/bash), ssh_run (run on the peer machine), web_search, "
+    "fetch_url, read_file, write_file, list_dir, screenshot_desktop, screenshot_url, remember, recall, "
+    "save_skill, use_skill, list_skills.\n\n"
     "WORKSPACE: your working directory is {workspace}. run_terminal runs there and relative file "
     "paths resolve there. Clone, create and build repos inside it. `cd` into a repo folder (or pass "
     "its path) before git commands.\n\n"
