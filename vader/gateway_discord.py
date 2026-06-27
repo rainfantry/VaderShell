@@ -104,11 +104,13 @@ def _run_turn(agent: Agent, prompt: str) -> str:
     log_lines, answer = [], []
     for kind, text in agent.stream_reply(prompt):
         if kind == "thinking":
-            log_lines.append(f"💭 {text[:300]}")
+            # Full thinking — no truncation, _split handles Discord limit
+            log_lines.append(f"💭 {text}")
         elif kind == "tool":
             log_lines.append(f"⚙ {text}")
         elif kind == "tool_result":
-            log_lines.append(f"  ↳ {text[:150]}")
+            # Show up to 800 chars of output so errors and command results are readable
+            log_lines.append(f"  ↳ {text[:800]}")
         elif kind == "text":
             answer.append(text)
     out = ""

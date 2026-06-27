@@ -246,7 +246,7 @@ class Agent:
                 yield ("tool", tools.short_detail(name, args))
                 result = tools.dispatch(name, args)
                 clean, image_path = tools.pop_image_path(result)
-                yield ("tool_result", clean.strip()[:200])
+                yield ("tool_result", clean.strip()[:800])
                 self.messages.append({
                     "role": "tool", "tool_call_id": tc.id, "content": clean,
                 })
