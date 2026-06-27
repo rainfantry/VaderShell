@@ -323,6 +323,7 @@ class Agent:
         self._cli_started = True
 
         # Each line of stdout is one JSON event. Parse and translate to (kind,text).
+        _cli_stdout_err = ""
         for line in proc.stdout:
             line = line.strip()
             if not line:
@@ -333,6 +334,9 @@ class Agent:
                 continue  # ignore any non-JSON noise
 
             etype = ev.get("type")
+            # Capture any error text from result/assistant events for the error message.
+            if ev.get("error") or ev.get("is_error"):
+                _cli_stdout_err = (ev.get("result") or ev.get("error") or "")[:300]
             if etype == "assistant":
                 # The model emitted content: thinking, a tool call, or answer text.
                 for block in ev.get("message", {}).get("content", []):
@@ -360,5 +364,7 @@ class Agent:
 
         proc.wait()
         if proc.returncode != 0:
+            # Real errors come through stdout as JSON, not stderr.
+            # Scan the lines we already consumed for error text.
             err = (proc.stderr.read() or "").strip()
-            raise RuntimeError(err[:500] or "claude CLI error")
+            raise RuntimeError(err[:500] or _cli_stdout_err or "claude CLI error")
