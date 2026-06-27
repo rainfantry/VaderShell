@@ -124,3 +124,17 @@ There's also a `claude-api` provider that calls the Anthropic API directly with 
 ---
 
 Built by [rainfantry](https://github.com/rainfantry).
+
+---
+
+## TODO — Release Blackops
+
+_Automated read-only assessment — what a full public-release pass would do for this repo. Suggestions only; nothing above has been changed or removed._
+
+- [ ] **AI/Claude attribution detected in git history — scrub it** (`filter-branch` + force-push; nuke-and-recreate if a 0-star/0-fork repo and the orphaned SHA lingers).
+- [ ] Add discovery topics for SEO (`gh repo edit --add-topic ...`, up to 20).
+- [ ] Cut a tagged release (`v1.0.0`); attach a build artifact if this ships a binary/app.
+- [ ] Verify a clean from-scratch build/run against the README quick start (produce a real artifact, don't trust the docs).
+- [ ] If this is a desktop app, make a self-contained build (bundle runtime assets/models into the binary; confirm it runs with no external files).
+
+<sub>Workflow: https://github.com/rainfantry/release-blackops-skill</sub>
