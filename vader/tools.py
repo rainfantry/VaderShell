@@ -19,16 +19,29 @@ as the claude path's --dangerously-skip-permissions).
 
 import json
 import os
+import re
+import shutil
 import subprocess
 import urllib.request
 
-# Where commands run + files resolve from. Home, so `gh`/`git`/CLAUDE.md/skills
-# all behave exactly like they do in George's own terminal.
+# Home, where the user's real env/auth lives.
 _HOME = os.path.expanduser("~")
 
+# VADER's workspace: where it clones / creates / builds repos so it doesn't junk
+# up home. Override with VADER_WORKSPACE. Commands run here; relative file paths
+# resolve here. Created on import.
+WORKSPACE = (os.environ.get("VADER_WORKSPACE", "").strip()
+             or os.path.join(_HOME, "vader-workspace"))
+_SHOTS = os.path.join(WORKSPACE, ".shots")  # screenshots land here
+for _d in (WORKSPACE, _SHOTS):
+    try:
+        os.makedirs(_d, exist_ok=True)
+    except Exception:
+        pass
+
 # Hard caps so a chatty command can't blow the model's context window.
-_MAX_OUT = 6000          # chars of a tool result fed back to the model
-_DEFAULT_TIMEOUT = 120   # seconds before a command is killed
+_MAX_OUT = 12000         # chars of a tool result fed back to the model
+_DEFAULT_TIMEOUT = 300   # seconds before a command is killed (builds are slow)
 
 
 def _clip(text: str, limit: int = _MAX_OUT) -> str:
@@ -62,7 +75,7 @@ def run_terminal(command: str, shell: str = "powershell", timeout: int = _DEFAUL
 
     try:
         proc = subprocess.run(
-            argv, cwd=_HOME, capture_output=True, text=True,
+            argv, cwd=WORKSPACE, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=timeout,
         )
     except FileNotFoundError:
@@ -142,10 +155,10 @@ def fetch_url(url: str, max_chars: int = 4000) -> str:
 
 # ── Tool: read_file / write_file / list_dir ───────────────────────────────
 def _resolve(path: str) -> str:
-    """Expand ~ and make relative paths resolve from home (the work dir)."""
+    """Expand ~ and make relative paths resolve from the workspace (the work dir)."""
     path = os.path.expanduser(path)
     if not os.path.isabs(path):
-        path = os.path.join(_HOME, path)
+        path = os.path.join(WORKSPACE, path)
     return path
 
 
@@ -184,6 +197,92 @@ def list_dir(path: str = ".") -> str:
     return _clip("\n".join(out))
 
 
+# ── Tool: screenshots (so VADER can SEE its work, like a human dev) ────────
+# Both save a PNG and return a "[[IMG:<path>]]" marker. core.py spots the marker
+# and feeds the image back into the conversation so the (vision-capable) model
+# actually views it — the same loop a person uses: build → screenshot → look → fix.
+
+def _find_browser() -> str:
+    """Locate Edge or Chrome for headless screenshots (no extra deps needed)."""
+    for name in ("msedge", "chrome", "chromium"):
+        p = shutil.which(name)
+        if p:
+            return p
+    for p in (
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    ):
+        if os.path.exists(p):
+            return p
+    return ""
+
+
+def screenshot_desktop(path: str = "") -> str:
+    """Capture the whole desktop to a PNG (Windows .NET via PowerShell — no deps)."""
+    out = _resolve(path or os.path.join(_SHOTS, "desktop.png"))
+    try:
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+    except Exception:
+        pass
+    ps = (
+        "Add-Type -AssemblyName System.Windows.Forms,System.Drawing;"
+        "$b=[System.Windows.Forms.SystemInformation]::VirtualScreen;"
+        "$bmp=New-Object System.Drawing.Bitmap $b.Width,$b.Height;"
+        "$g=[System.Drawing.Graphics]::FromImage($bmp);"
+        "$g.CopyFromScreen($b.X,$b.Y,0,0,$bmp.Size);"
+        f"$bmp.Save('{out}');$g.Dispose();$bmp.Dispose()"
+    )
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+                           capture_output=True, text=True, timeout=60)
+    except Exception as e:  # noqa: BLE001
+        return f"ERROR: desktop screenshot failed: {e}"
+    if not os.path.exists(out):
+        return f"ERROR: desktop screenshot failed: {(r.stderr or '').strip()[:200]}"
+    return f"[[IMG:{out}]] desktop screenshot saved to {out}"
+
+
+def screenshot_url(url: str, path: str = "", width: int = 1366, height: int = 900) -> str:
+    """Render a web page headless (Edge/Chrome) and save a PNG. Use to SEE a web
+    app you're building after starting its dev server with run_terminal."""
+    if not url or not url.strip():
+        return "ERROR: empty url."
+    browser = _find_browser()
+    if not browser:
+        return "ERROR: no Edge/Chrome found for headless screenshot."
+    out = _resolve(path or os.path.join(_SHOTS, "page.png"))
+    try:
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        width, height = int(width), int(height)
+    except Exception:
+        width, height = 1366, 900
+    argv = [browser, "--headless=new", "--disable-gpu", "--hide-scrollbars",
+            "--no-sandbox", f"--window-size={width},{height}",
+            f"--screenshot={out}", url]
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=90)
+    except Exception as e:  # noqa: BLE001
+        return f"ERROR: page screenshot failed: {e}"
+    if not os.path.exists(out):
+        return f"ERROR: page screenshot failed: {(r.stderr or '').strip()[:200]}"
+    return f"[[IMG:{out}]] screenshot of {url} saved to {out}"
+
+
+# Marker the screenshot tools embed; core.py extracts the path to feed the image
+# back to the model, then shows the model a cleaned result string.
+_IMG_RE = re.compile(r"\[\[IMG:(.+?)\]\]\s*")
+
+
+def pop_image_path(result: str):
+    """Split a tool result into (clean_text, image_path_or_None)."""
+    m = _IMG_RE.search(result or "")
+    if not m:
+        return result, None
+    return _IMG_RE.sub("", result, count=1).strip(), m.group(1)
+
+
 # ── Registry ──────────────────────────────────────────────────────────────
 # name → callable
 _HANDLERS = {
@@ -193,6 +292,8 @@ _HANDLERS = {
     "read_file": read_file,
     "write_file": write_file,
     "list_dir": list_dir,
+    "screenshot_desktop": screenshot_desktop,
+    "screenshot_url": screenshot_url,
 }
 
 # OpenAI "tools" schema the model is shown. Keep descriptions sharp — the model
@@ -286,10 +387,41 @@ SCHEMAS = [
         "type": "function",
         "function": {
             "name": "list_dir",
-            "description": "List a directory's entries (files and folders). Default is the home directory.",
+            "description": "List a directory's entries (files and folders). Default is the workspace.",
             "parameters": {
                 "type": "object",
                 "properties": {"path": {"type": "string"}},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "screenshot_desktop",
+            "description": ("Capture the whole desktop to a PNG and SEE it. Use to check a running "
+                            "GUI app, an editor, or anything on screen."),
+            "parameters": {
+                "type": "object",
+                "properties": {"path": {"type": "string", "description": "Optional output path."}},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "screenshot_url",
+            "description": ("Render a web page headless (Edge/Chrome) to a PNG and SEE it. The key "
+                            "web-dev check: after starting a dev server with run_terminal, screenshot "
+                            "e.g. http://localhost:3000 to verify the UI rendered, then fix and repeat."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string"},
+                    "path": {"type": "string", "description": "Optional output path."},
+                    "width": {"type": "integer", "description": "Viewport width (default 1366)."},
+                    "height": {"type": "integer", "description": "Viewport height (default 900)."},
+                },
+                "required": ["url"],
             },
         },
     },

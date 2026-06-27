@@ -3,6 +3,35 @@
 All notable changes to VaderShell. Built ground-up in a single session — this log
 tells the story of how it came together, and why each piece exists.
 
+## 0.4.0 — dev workspace + eyes (screenshots the model can see)
+
+Turns the Kimi tool belt into a proper software-dev agent: a real workspace, and
+the ability to *see* its own work via screenshots fed back to the (vision-capable)
+model — the build → screenshot → look → fix loop a human dev uses.
+
+### Workspace (`vader/tools.py`)
+- New `VADER_WORKSPACE` (default `~/vader-workspace`, auto-created). `run_terminal`
+  runs there and relative file paths resolve there, so VADER clones/creates/builds
+  repos in one place instead of junking up home.
+- Bumped limits for real dev work: tool output cap 6k → 12k chars, command timeout
+  120s → 300s, and (in `core.py`) tool-step cap 16 → 40 per turn.
+
+### Eyes — screenshots (`vader/tools.py` + `vader/core.py`)
+- `screenshot_desktop` — capture the whole screen to PNG (Windows .NET via
+  PowerShell; no dependency).
+- `screenshot_url` — render a web page headless via Edge/Chrome to PNG (no
+  dependency, no Playwright). Pair with a dev server: build → `screenshot_url
+  http://localhost:PORT` → look → fix.
+- The agent loop now feeds captured screenshots back to the model as inline images
+  (base64), so a vision model actually *sees* them and reasons over what's on
+  screen. Toggle with `VADER_VISION` (default on). Verified end-to-end on Kimi K2.5.
+
+### Dev guidance (`vader/core.py`)
+- The system prompt now steers VADER as a dev agent: work in the workspace, use the
+  inherited gh/git auth to clone/create (`gh repo create --private`)/commit/push,
+  verify by running/building/testing and screenshotting UIs, branch before risky
+  work, never force-push, and never add AI/Claude attribution to commits.
+
 ## 0.3.0 — tools for the Kimi/OpenRouter brain
 
 Until now only the **claude** brain could act (it shells out to the real `claude`

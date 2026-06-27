@@ -17,6 +17,7 @@ terminal commands, searches the web, and reads/writes files in a tool-call loop.
   - "text"         → the actual answer
 """
 
+import base64
 import json
 import os
 import subprocess
@@ -34,20 +35,33 @@ _PERSONA = (
 # Reply cap for the kimi/openrouter (non-CLI) paths. The CLI manages its own.
 _MAX_TOKENS = 8000
 
-# Hard cap on tool-call rounds in one turn so a confused model can't loop forever.
-_MAX_TOOL_STEPS = 16
+# Hard cap on tool-call rounds in one turn. Dev work (build/test/fix) eats steps,
+# so this is generous — it's only a runaway-loop backstop, not a normal limit.
+_MAX_TOOL_STEPS = 40
 
 # Extra system guidance for the kimi/openrouter path now that it has a tool belt.
 # (The claude-CLI path doesn't need this — it IS Claude Code, with its own tools.)
+# {workspace} is filled in at runtime from tools.WORKSPACE.
 _TOOLS_SYSTEM = (
-    "You are a fully autonomous agent on George's Windows 11 machine with a real tool belt: "
-    "run_terminal (PowerShell/cmd/bash), web_search, fetch_url, read_file, write_file, list_dir. "
-    "Commands run in his home directory and inherit his logged-in gh/git auth, PATH and environment — "
-    "so you can clone and push private repos, drive the gh CLI, build/run/test projects, and install "
-    "packages. ACT, don't just advise: when a task needs the machine, CALL the tools and use what they "
-    "return. Chain tools, verify your work by actually running it and checking the output, and only give "
-    "your final answer once the job is truly done. Use shell='cmd' for python/node scripts (PowerShell "
-    "mangles some quoting). Be deliberate with destructive commands. Keep replies tight."
+    "You are a fully autonomous software-dev agent on George's Windows 11 machine with a real "
+    "tool belt: run_terminal (PowerShell/cmd/bash), web_search, fetch_url, read_file, write_file, "
+    "list_dir, screenshot_desktop, screenshot_url.\n\n"
+    "WORKSPACE: your working directory is {workspace}. run_terminal runs there and relative file "
+    "paths resolve there. Clone, create and build repos inside it. `cd` into a repo folder (or pass "
+    "its path) before git commands.\n\n"
+    "WHAT YOU CAN DO: commands inherit George's logged-in gh/git auth, PATH and environment. So you "
+    "can clone and push PRIVATE repos, create new ones with `gh repo create <name> --private`, commit "
+    "and push, drive the gh CLI, build/run/test projects (npm, dotnet, python…), and install packages. "
+    "When building a web app, start its dev server with run_terminal, then screenshot_url "
+    "http://localhost:<port> to SEE it rendered (the image is shown back to you) — fix and re-shoot "
+    "until it's right.\n\n"
+    "HOW TO WORK: ACT, don't just advise — when a task needs the machine, CALL the tools. Chain them. "
+    "Verify by actually running/building/testing and reading the output (and screenshotting UIs); only "
+    "claim done once it truly is. If a command fails, read the error and fix it — don't guess.\n\n"
+    "GIT RULES: branch before risky work; never force-push; never commit secrets; NEVER add Claude/AI "
+    "attribution or co-author lines to commits — all work is George's. Use shell='cmd' for python/node "
+    "scripts (PowerShell mangles some quoting). Be deliberate with destructive commands. Keep chat "
+    "replies tight."
 )
 
 
@@ -63,15 +77,29 @@ class Agent:
         # claude-CLI session id so the CLI keeps context across turns.
         self._cli_session_id = str(uuid.uuid4())
         self._cli_started = False
+        # Screenshots captured this round, fed back to the model as images so it
+        # can SEE them. Off only if VADER_VISION=0 (the model must be multimodal).
+        self._pending_images: list[str] = []
+        self._vision = os.environ.get("VADER_VISION", "1").strip() != "0"
 
     def _system_prompt(self) -> str:
         """System prompt for the non-CLI paths. The OAuth API path must lead with
         the Claude-Code line; everyone else just gets the persona."""
         if self.cfg.needs_cc_prefix:
             return f"{CLAUDE_CODE_SYSTEM_PREFIX}\n\n{_PERSONA}"
-        # The OpenAI-compatible path (Kimi/OpenRouter) now wields tools — tell it so.
+        # The OpenAI-compatible path (Kimi/OpenRouter) now wields tools — tell it so,
+        # and pin its identity: Kimi K2 loves to claim it's Claude/GPT, so state the
+        # real model explicitly (built dynamically from the resolved brain).
         if self.cfg.kind == "openai":
-            return f"{_PERSONA}\n\n{_TOOLS_SYSTEM}"
+            from . import tools  # for the live workspace path
+            identity = (
+                f"Your identity: you are VADER, running on the '{self.cfg.model}' model "
+                f"via the {self.cfg.provider} API. You are NOT Claude, Anthropic, GPT, or "
+                f"OpenAI — never claim to be. If asked what model or AI you are, say you "
+                f"are VADER on Kimi ({self.cfg.model})."
+            )
+            tools_system = _TOOLS_SYSTEM.format(workspace=tools.WORKSPACE)
+            return f"{_PERSONA}\n\n{identity}\n\n{tools_system}"
         return _PERSONA
 
     def reset(self) -> None:
@@ -79,6 +107,7 @@ class Agent:
         self.messages = []
         self._cli_session_id = str(uuid.uuid4())
         self._cli_started = False
+        self._pending_images = []
 
     def stream_reply(self, user_text: str):
         """Add the user's message, stream the reply as (kind, text) pairs, then
@@ -142,9 +171,10 @@ class Agent:
                     yield ("text", text)
                 return
 
-            # The model wants to act. Sometimes it narrates first — surface that.
-            if msg.content:
-                yield ("thinking", msg.content.strip())
+            # The model wants to act. Surface any narration / reasoning it gave.
+            narration = msg.content or getattr(msg, "reasoning_content", "") or ""
+            if narration.strip():
+                yield ("thinking", narration.strip())
 
             # Record the assistant's tool-call turn in the exact shape the API
             # needs echoed back next round (id + name + raw JSON args).
@@ -160,21 +190,50 @@ class Agent:
             })
 
             # Run each tool, stream the action + a slice of its result, and feed
-            # the full result back as a 'tool' message keyed to its call id.
+            # the full result back as a 'tool' message keyed to its call id. If a
+            # tool produced a screenshot, stash it to show the model as an image.
             for tc in tool_calls:
                 name = tc.function.name
                 args = tc.function.arguments
                 yield ("tool", tools.short_detail(name, args))
                 result = tools.dispatch(name, args)
-                yield ("tool_result", result.strip()[:200])
+                clean, image_path = tools.pop_image_path(result)
+                yield ("tool_result", clean.strip()[:200])
                 self.messages.append({
-                    "role": "tool", "tool_call_id": tc.id, "content": result,
+                    "role": "tool", "tool_call_id": tc.id, "content": clean,
                 })
+                if image_path and self._vision:
+                    self._pending_images.append(image_path)
+
+            # Show the model the screenshots it just took (it's vision-capable),
+            # so the next round it reasons over what it actually SEES.
+            self._flush_pending_images()
 
         # Ran out of steps — tell the operator rather than hanging silently.
         msg = "(stopped after hitting the tool-step limit — say 'continue' to keep going.)"
         self.messages.append({"role": "assistant", "content": msg})
         yield ("text", msg)
+
+    def _flush_pending_images(self) -> None:
+        """Append captured screenshots as a vision user-message so the model SEES
+        them next round. Base64-inlines each PNG; skips any it can't read."""
+        if not self._pending_images:
+            return
+        content = [{"type": "text",
+                    "text": "Screenshots you just captured — view them to verify your work:"}]
+        for path in self._pending_images:
+            try:
+                with open(path, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode()
+                content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{b64}"},
+                })
+            except Exception:
+                continue  # unreadable shot — skip, don't break the turn
+        if len(content) > 1:
+            self.messages.append({"role": "user", "content": content})
+        self._pending_images = []
 
     def _stream_claude_cli(self, user_text: str, full: list[str]):
         """Drive the real `claude` binary with full tools + autonomy, parsing its
