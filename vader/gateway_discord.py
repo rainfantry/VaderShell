@@ -101,15 +101,19 @@ def _split(text: str):
 
 
 def _run_turn(agent: Agent, prompt: str) -> str:
-    actions, answer = [], []
+    log_lines, answer = [], []
     for kind, text in agent.stream_reply(prompt):
-        if kind == "tool":
-            actions.append(f"⚙ {text}")
+        if kind == "thinking":
+            log_lines.append(f"💭 {text[:300]}")
+        elif kind == "tool":
+            log_lines.append(f"⚙ {text}")
+        elif kind == "tool_result":
+            log_lines.append(f"  ↳ {text[:150]}")
         elif kind == "text":
             answer.append(text)
     out = ""
-    if actions:
-        out += "\n".join(actions) + "\n\n"
+    if log_lines:
+        out += "\n".join(log_lines) + "\n\n"
     return (out + "".join(answer)).strip()
 
 
