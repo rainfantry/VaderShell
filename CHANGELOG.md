@@ -3,6 +3,22 @@
 All notable changes to VaderShell. Built ground-up in a single session — this log
 tells the story of how it came together, and why each piece exists.
 
+## 0.6.0 — SSH to peer machines + full docs
+
+### `ssh_run` (`vader/tools.py`)
+- Run a command on another machine over SSH (key auth, BatchMode so it never hangs
+  on a password prompt). Target defaults to the `VADER_SSH_*` env vars; a `host`
+  arg overrides for a one-off. This is how two VaderShell gateways operate each
+  other's box — full bidirectional machine-to-machine control on a LAN.
+- The tool description notes the remote default shell is cmd.exe (chain with `&`).
+
+### Docs
+- README rewritten to cover the whole agent: the kimi/openrouter tool belt (14
+  tools), workspace, screenshots + vision, persistent memory + skills, SSH between
+  machines, and a **Configuration** section spelling out where everything lives
+  (`.env`, `~/.vader`, `~/vader-workspace`) and every key.
+- `.env.example` documents `VADER_SSH_*`, `VADER_HOME`, `VADER_WORKSPACE`, `VADER_VISION`.
+
 ## 0.5.0 — persistent memory + self-taught skills
 
 VADER can now LEARN and keep it. Memory and skills live on disk under `~/.vader`
