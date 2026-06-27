@@ -283,6 +283,122 @@ def pop_image_path(result: str):
     return _IMG_RE.sub("", result, count=1).strip(), m.group(1)
 
 
+# ── Persistent memory & skills (learning that survives restart) ────────────
+# Stored under ~/.vader (override with VADER_HOME) — OUTSIDE the repo, so it's
+# personal and durable. core.py folds memory + the skills index into the system
+# prompt every turn, so anything saved here is in effect on the very next message
+# AND after a restart (it's just files on disk).
+VADER_HOME = (os.environ.get("VADER_HOME", "").strip()
+              or os.path.join(_HOME, ".vader"))
+_MEMORY_FILE = os.path.join(VADER_HOME, "MEMORY.md")
+_SKILLS_DIR = os.path.join(VADER_HOME, "skills")
+for _d in (VADER_HOME, _SKILLS_DIR):
+    try:
+        os.makedirs(_d, exist_ok=True)
+    except Exception:
+        pass
+
+
+def _skill_slug(name: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")
+    return slug or "skill"
+
+
+def remember(fact: str) -> str:
+    """Append a durable fact / preference to long-term memory."""
+    fact = (fact or "").strip()
+    if not fact:
+        return "ERROR: empty fact."
+    try:
+        with open(_MEMORY_FILE, "a", encoding="utf-8") as f:
+            f.write(f"- {fact}\n")
+    except Exception as e:  # noqa: BLE001
+        return f"ERROR: {e}"
+    return f"remembered: {fact}"
+
+
+def recall() -> str:
+    """Read everything in long-term memory."""
+    if not os.path.exists(_MEMORY_FILE):
+        return "(memory empty)"
+    try:
+        with open(_MEMORY_FILE, "r", encoding="utf-8", errors="replace") as f:
+            return _clip(f.read().strip()) or "(memory empty)"
+    except Exception as e:  # noqa: BLE001
+        return f"ERROR: {e}"
+
+
+def save_skill(name: str, description: str, steps: str) -> str:
+    """Save a reusable workflow as a skill that persists across restarts."""
+    if not (steps or "").strip():
+        return "ERROR: empty steps."
+    slug = _skill_slug(name)
+    path = os.path.join(_SKILLS_DIR, slug + ".md")
+    body = (f"---\ndescription: {(description or '').strip()}\n---\n"
+            f"# {name}\n\n{steps.strip()}\n")
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(body)
+    except Exception as e:  # noqa: BLE001
+        return f"ERROR: {e}"
+    return f"saved skill '{slug}' — available now and after restart ({path})."
+
+
+def _skill_files():
+    try:
+        return sorted(p for p in os.listdir(_SKILLS_DIR) if p.endswith(".md"))
+    except Exception:
+        return []
+
+
+def list_skills() -> str:
+    """List saved skills and their one-line descriptions."""
+    files = _skill_files()
+    if not files:
+        return "(no skills saved yet)"
+    out = []
+    for fn in files:
+        desc = ""
+        try:
+            with open(os.path.join(_SKILLS_DIR, fn), "r", encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    if line.startswith("description:"):
+                        desc = line.split(":", 1)[1].strip()
+                        break
+        except Exception:
+            pass
+        out.append(f"- {fn[:-3]}: {desc}" if desc else f"- {fn[:-3]}")
+    return "\n".join(out)
+
+
+def use_skill(name: str) -> str:
+    """Load a saved skill's full steps so you can follow them."""
+    slug = _skill_slug(name)
+    path = os.path.join(_SKILLS_DIR, slug + ".md")
+    if not os.path.exists(path):
+        return f"ERROR: no skill '{slug}'. Available:\n{list_skills()}"
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            return _clip(f.read())
+    except Exception as e:  # noqa: BLE001
+        return f"ERROR: {e}"
+
+
+# Helpers core.py uses to fold memory + skills into the system prompt each turn.
+def memory_text() -> str:
+    if not os.path.exists(_MEMORY_FILE):
+        return ""
+    try:
+        with open(_MEMORY_FILE, "r", encoding="utf-8", errors="replace") as f:
+            return f.read().strip()
+    except Exception:
+        return ""
+
+
+def skills_index() -> str:
+    return list_skills() if _skill_files() else ""
+
+
 # ── Registry ──────────────────────────────────────────────────────────────
 # name → callable
 _HANDLERS = {
@@ -294,6 +410,11 @@ _HANDLERS = {
     "list_dir": list_dir,
     "screenshot_desktop": screenshot_desktop,
     "screenshot_url": screenshot_url,
+    "remember": remember,
+    "recall": recall,
+    "save_skill": save_skill,
+    "use_skill": use_skill,
+    "list_skills": list_skills,
 }
 
 # OpenAI "tools" schema the model is shown. Keep descriptions sharp — the model
@@ -425,6 +546,67 @@ SCHEMAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "remember",
+            "description": ("Save a durable fact or preference to long-term memory (persists across "
+                            "restarts). Use whenever George tells you something to remember, or you "
+                            "learn a lasting preference (e.g. 'George deploys to Vercel')."),
+            "parameters": {
+                "type": "object",
+                "properties": {"fact": {"type": "string"}},
+                "required": ["fact"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "recall",
+            "description": "Read everything in your long-term memory.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "save_skill",
+            "description": ("Save a reusable workflow as a named skill that persists across restarts. "
+                            "Use when you've worked out a repeatable procedure worth keeping. Write "
+                            "'steps' as clear, numbered instructions you (or future-you) can follow."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Short skill name, e.g. 'scaffold-react-app'."},
+                    "description": {"type": "string", "description": "One line: what it does / when to use it."},
+                    "steps": {"type": "string", "description": "The full step-by-step workflow."},
+                },
+                "required": ["name", "description", "steps"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "use_skill",
+            "description": ("Load a saved skill's full steps so you can follow them. Call this BEFORE "
+                            "doing a task you have a matching skill for."),
+            "parameters": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+                "required": ["name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_skills",
+            "description": "List the skills you've saved and their descriptions.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
 ]
 
 
@@ -458,5 +640,6 @@ def short_detail(name: str, arguments) -> str:
     if not isinstance(arguments, dict):
         arguments = {}
     detail = (arguments.get("command") or arguments.get("query")
-              or arguments.get("url") or arguments.get("path") or "")
+              or arguments.get("url") or arguments.get("path")
+              or arguments.get("name") or arguments.get("fact") or "")
     return f"{name} {detail}".strip()

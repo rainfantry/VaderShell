@@ -45,7 +45,8 @@ _MAX_TOOL_STEPS = 40
 _TOOLS_SYSTEM = (
     "You are a fully autonomous software-dev agent on George's Windows 11 machine with a real "
     "tool belt: run_terminal (PowerShell/cmd/bash), web_search, fetch_url, read_file, write_file, "
-    "list_dir, screenshot_desktop, screenshot_url.\n\n"
+    "list_dir, screenshot_desktop, screenshot_url, remember, recall, save_skill, use_skill, "
+    "list_skills.\n\n"
     "WORKSPACE: your working directory is {workspace}. run_terminal runs there and relative file "
     "paths resolve there. Clone, create and build repos inside it. `cd` into a repo folder (or pass "
     "its path) before git commands.\n\n"
@@ -55,6 +56,11 @@ _TOOLS_SYSTEM = (
     "When building a web app, start its dev server with run_terminal, then screenshot_url "
     "http://localhost:<port> to SEE it rendered (the image is shown back to you) — fix and re-shoot "
     "until it's right.\n\n"
+    "LEARNING (persists across restarts): you have long-term memory and skills. When George tells you "
+    "to remember something or you learn a lasting preference, call remember(). When you work out a "
+    "reusable workflow worth keeping, call save_skill(name, description, steps). Before doing a task you "
+    "already have a skill for, call use_skill(name) to load its steps and follow them. Your current "
+    "memory and skill list are shown to you below the rules.\n\n"
     "HOW TO WORK: ACT, don't just advise — when a task needs the machine, CALL the tools. Chain them. "
     "Verify by actually running/building/testing and reading the output (and screenshotting UIs); only "
     "claim done once it truly is. If a command fails, read the error and fix it — don't guess.\n\n"
@@ -99,7 +105,18 @@ class Agent:
                 f"are VADER on Kimi ({self.cfg.model})."
             )
             tools_system = _TOOLS_SYSTEM.format(workspace=tools.WORKSPACE)
-            return f"{_PERSONA}\n\n{identity}\n\n{tools_system}"
+            # Fold in persistent memory + the learned-skills index, read fresh from
+            # disk each turn — so anything saved is live next message AND after restart.
+            learned = ""
+            mem = tools.memory_text()
+            if mem:
+                learned += ("\n\nLONG-TERM MEMORY (persists across restarts — treat as known facts):\n"
+                            + mem)
+            idx = tools.skills_index()
+            if idx:
+                learned += ("\n\nSKILLS YOU'VE LEARNED (call use_skill(name) to load the full steps "
+                            "before doing a matching task):\n" + idx)
+            return f"{_PERSONA}\n\n{identity}\n\n{tools_system}{learned}"
         return _PERSONA
 
     def reset(self) -> None:

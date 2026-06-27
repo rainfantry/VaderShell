@@ -3,6 +3,31 @@
 All notable changes to VaderShell. Built ground-up in a single session — this log
 tells the story of how it came together, and why each piece exists.
 
+## 0.5.0 — persistent memory + self-taught skills
+
+VADER can now LEARN and keep it. Memory and skills live on disk under `~/.vader`
+(override `VADER_HOME`), outside the repo, so they survive restarts — and because
+the system prompt reads them fresh every turn, anything saved is in effect on the
+very next message too.
+
+### Memory (`vader/tools.py`)
+- `remember(fact)` — append a durable fact/preference to long-term memory.
+- `recall()` — read it back. Memory is auto-folded into the system prompt each turn.
+
+### Skills (`vader/tools.py`)
+- `save_skill(name, description, steps)` — VADER writes its own reusable workflow as
+  a markdown skill that persists. The skills index is shown in the prompt.
+- `use_skill(name)` — load a skill's full steps before doing a matching task.
+- `list_skills()` — see what it has learned.
+
+### Prompt wiring (`vader/core.py`)
+- `_system_prompt()` folds the live memory text and skills index in every turn (read
+  from disk), so saved learning applies immediately and after a `/restart`.
+- Dev guidance now tells VADER to `remember()` lasting facts and `save_skill()` reusable
+  workflows, and to `use_skill()` before repeating a known task.
+- Verified end-to-end on Kimi K2.5: it saved a skill, a fresh agent loaded it from
+  disk, and it then executed the skill's steps autonomously.
+
 ## 0.4.0 — dev workspace + eyes (screenshots the model can see)
 
 Turns the Kimi tool belt into a proper software-dev agent: a real workspace, and
