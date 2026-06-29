@@ -100,46 +100,54 @@ def _split(text: str):
         text = text[_DISCORD_LIMIT:]
 
 
-def _run_turn_with_output(agent: Agent, prompt: str) -> tuple[str, str]:
-    """Collect thinking/tool output separately from the final answer.
-
-    Returns (thinking_tools_output, final_answer) so the caller can post
-    them as separate Discord messages, making progress visible.
-    """
-    log_lines, answer = [], []
-    for kind, text in agent.stream_reply(prompt):
-        if kind == "thinking":
-            log_lines.append(f"💭 {text}")
-        elif kind == "tool":
-            log_lines.append(f"⚙ {text}")
-        elif kind == "tool_result":
-            log_lines.append(f"  ↳ {text[:800]}")
-        elif kind == "text":
-            answer.append(text)
-
-    thinking_output = ""
-    if log_lines:
-        thinking_output = "\n".join(log_lines)
-
-    answer_output = "".join(answer).strip()
-    return thinking_output, answer_output
-
-
 async def _stream_turn_to_discord(agent: Agent, prompt: str, channel) -> None:
-    """Run a turn and post thinking/tool output, then the final answer."""
-    log.debug("streaming turn to Discord")
-    thinking_output, answer_output = await asyncio.to_thread(
-        _run_turn_with_output, agent, prompt
-    )
+    """Stream thinking/tool output LIVE to Discord in real-time.
 
-    # Post thinking/tool output first (if any), so user sees what's happening
-    if thinking_output:
-        for chunk in _split(thinking_output):
-            await channel.send(chunk)
+    Spawns a thread to collect items, feeds them to async via queue, posts
+    immediately so you see progress as it happens.
+    """
+    queue = asyncio.Queue()
+    answer_parts = []
 
-    # Post the final answer
-    if answer_output:
-        for chunk in _split(answer_output):
+    def _thread_collector():
+        """Run in thread: collect stream items and put them in queue."""
+        for kind, text in agent.stream_reply(prompt):
+            queue.put_nowait((kind, text))
+        queue.put_nowait(None)  # EOF marker
+
+    # Start collector thread
+    collector = asyncio.create_task(asyncio.to_thread(_thread_collector))
+
+    # Main loop: read queue and post to Discord as items arrive
+    try:
+        while True:
+            item = await asyncio.wait_for(queue.get(), timeout=1.0)
+            if item is None:  # EOF
+                break
+
+            kind, text = item
+            if kind == "thinking":
+                msg = f"💭 {text}"
+                await channel.send(msg)
+            elif kind == "tool":
+                msg = f"⚙ {text}"
+                await channel.send(msg)
+            elif kind == "tool_result":
+                msg = f"  ↳ {text[:800]}"
+                await channel.send(msg)
+            elif kind == "text":
+                answer_parts.append(text)
+
+    except asyncio.TimeoutError:
+        log.debug("stream timeout (items may still be arriving)")
+
+    # Wait for collector to finish
+    await collector
+
+    # Post final answer
+    if answer_parts:
+        answer = "".join(answer_parts).strip()
+        for chunk in _split(answer):
             await channel.send(chunk)
 
 
