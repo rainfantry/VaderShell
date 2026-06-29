@@ -101,54 +101,36 @@ def _split(text: str):
 
 
 async def _stream_turn_to_discord(agent: Agent, prompt: str, channel) -> None:
-    """Stream thinking/tool output LIVE to Discord in real-time.
+    """Run a turn (in a thread) and post tool/thinking output then the answer.
 
-    Spawns a thread to collect items, feeds them to async via queue, posts
-    immediately so you see progress as it happens.
+    Thread-safe: the whole synchronous stream is drained in one worker thread,
+    then posted. (A queue-across-threads approach is NOT safe — asyncio.Queue
+    isn't thread-safe and the model can pause 20s+ between items.)
     """
-    queue = asyncio.Queue()
-    answer_parts = []
+    log_lines, answer = await asyncio.to_thread(_drain_turn, agent, prompt)
 
-    def _thread_collector():
-        """Run in thread: collect stream items and put them in queue."""
-        for kind, text in agent.stream_reply(prompt):
-            queue.put_nowait((kind, text))
-        queue.put_nowait(None)  # EOF marker
-
-    # Start collector thread
-    collector = asyncio.create_task(asyncio.to_thread(_thread_collector))
-
-    # Main loop: read queue and post to Discord as items arrive
-    try:
-        while True:
-            item = await asyncio.wait_for(queue.get(), timeout=1.0)
-            if item is None:  # EOF
-                break
-
-            kind, text = item
-            if kind == "thinking":
-                msg = f"💭 {text}"
-                await channel.send(msg)
-            elif kind == "tool":
-                msg = f"⚙ {text}"
-                await channel.send(msg)
-            elif kind == "tool_result":
-                msg = f"  ↳ {text[:800]}"
-                await channel.send(msg)
-            elif kind == "text":
-                answer_parts.append(text)
-
-    except asyncio.TimeoutError:
-        log.debug("stream timeout (items may still be arriving)")
-
-    # Wait for collector to finish
-    await collector
-
-    # Post final answer
-    if answer_parts:
-        answer = "".join(answer_parts).strip()
+    # Post thinking/tool log first (so you can see what it did), then the answer.
+    if log_lines:
+        for chunk in _split("\n".join(log_lines)):
+            await channel.send(chunk)
+    if answer:
         for chunk in _split(answer):
             await channel.send(chunk)
+
+
+def _drain_turn(agent: Agent, prompt: str):
+    """Synchronously consume the whole reply stream → (log_lines, answer)."""
+    log_lines, answer = [], []
+    for kind, text in agent.stream_reply(prompt):
+        if kind == "thinking":
+            log_lines.append(f"💭 {text}")
+        elif kind == "tool":
+            log_lines.append(f"⚙ {text}")
+        elif kind == "tool_result":
+            log_lines.append(f"  ↳ {text[:800]}")
+        elif kind == "text":
+            answer.append(text)
+    return log_lines, "".join(answer).strip()
 
 
 def _run_turn(agent: Agent, prompt: str) -> str:
