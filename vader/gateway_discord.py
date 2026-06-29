@@ -100,16 +100,58 @@ def _split(text: str):
         text = text[_DISCORD_LIMIT:]
 
 
-def _run_turn(agent: Agent, prompt: str) -> str:
+def _run_turn_with_output(agent: Agent, prompt: str) -> tuple[str, str]:
+    """Collect thinking/tool output separately from the final answer.
+
+    Returns (thinking_tools_output, final_answer) so the caller can post
+    them as separate Discord messages, making progress visible.
+    """
     log_lines, answer = [], []
     for kind, text in agent.stream_reply(prompt):
         if kind == "thinking":
-            # Full thinking — no truncation, _split handles Discord limit
             log_lines.append(f"💭 {text}")
         elif kind == "tool":
             log_lines.append(f"⚙ {text}")
         elif kind == "tool_result":
-            # Show up to 800 chars of output so errors and command results are readable
+            log_lines.append(f"  ↳ {text[:800]}")
+        elif kind == "text":
+            answer.append(text)
+
+    thinking_output = ""
+    if log_lines:
+        thinking_output = "\n".join(log_lines)
+
+    answer_output = "".join(answer).strip()
+    return thinking_output, answer_output
+
+
+async def _stream_turn_to_discord(agent: Agent, prompt: str, channel) -> None:
+    """Run a turn and post thinking/tool output, then the final answer."""
+    log.debug("streaming turn to Discord")
+    thinking_output, answer_output = await asyncio.to_thread(
+        _run_turn_with_output, agent, prompt
+    )
+
+    # Post thinking/tool output first (if any), so user sees what's happening
+    if thinking_output:
+        for chunk in _split(thinking_output):
+            await channel.send(chunk)
+
+    # Post the final answer
+    if answer_output:
+        for chunk in _split(answer_output):
+            await channel.send(chunk)
+
+
+def _run_turn(agent: Agent, prompt: str) -> str:
+    """Synchronous version — collects and returns everything."""
+    log_lines, answer = [], []
+    for kind, text in agent.stream_reply(prompt):
+        if kind == "thinking":
+            log_lines.append(f"💭 {text}")
+        elif kind == "tool":
+            log_lines.append(f"⚙ {text}")
+        elif kind == "tool_result":
             log_lines.append(f"  ↳ {text[:800]}")
         elif kind == "text":
             answer.append(text)
@@ -356,12 +398,10 @@ def main() -> None:
                     await message.channel.send(chunk)
             return
 
-        # Normal chat.
+        # Normal chat — show thinking/tool output as separate messages
         log.info("answering operator")
         async with message.channel.typing():
-            reply = await asyncio.to_thread(_run_turn, agent, content)
-        for chunk in _split(reply):
-            await message.channel.send(chunk)
+            await _stream_turn_to_discord(agent, content, message.channel)
 
     client.run(_TOKEN)
     if _restart["requested"]:

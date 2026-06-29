@@ -15,6 +15,54 @@ VADER reading a second bot and firing a second opinion in a shared channel:
 
 ![VADER second-opinion on a peer bot](docs/vafder.png)
 
+## Quick Reference — How to Launch
+
+From PowerShell (aliases defined in your profile):
+
+| Alias | What it does | Runs |
+|---|---|---|
+| `vader` | Terminal agent (cloud brain — Kimi by default) | `VaderShell\22div.ps1` |
+| `vader-bot` | Discord gateway (cloud brain) | `VaderShell\gateway.ps1` |
+| `vaderlocal` | Terminal agent (local Ollama brain) | `VaderLocal\22div.ps1` |
+| `vaderlocal-bot` | Discord gateway (local Ollama brain) | `VaderLocal\gateway.ps1` |
+
+**Without aliases** (from the repo directory):
+```powershell
+# Terminal agent
+.\22div.ps1
+
+# Discord gateway
+.\gateway.ps1
+```
+
+### Prerequisites by mode
+
+| Mode | Needs |
+|---|---|
+| `vader` (kimi) | `KIMI_API_KEY` in `.env` |
+| `vader` (claude) | Claude Code installed + logged in |
+| `vader` (openrouter) | `OPENROUTER_API_KEY` in `.env` |
+| `vader-bot` | Above + `DISCORD_BOT_TOKEN` in `.env` |
+| `vaderlocal` | Ollama running locally with a model pulled |
+| `vaderlocal-bot` | Ollama + its own `DISCORD_BOT_TOKEN` in `.env` |
+
+### Switch brains on the fly
+
+In Discord: `/model opus`, `/model sonnet`, `/model kimi`
+In `.env`: change `VADER_PROVIDER` to `claude`, `kimi`, or `openrouter`, then restart.
+
+### Common Discord commands
+
+| Command | What |
+|---|---|
+| `/help` | List commands |
+| `/plan <task>` | Two-model planning council |
+| `/model <brain>` | Switch brain + reboot |
+| `/reset` | Clear conversation memory |
+| `/restart` | Reboot the gateway |
+
+> **Two machines?** Each machine needs its **own** Discord bot token. Running the same token on two machines causes a disconnect loop. Create a second Discord app for the second machine.
+
 ## Why the Claude path works
 
 Most "use my Claude subscription in my own app" attempts hand-roll an API call with an OAuth token — which Anthropic rate-limits hard (instant 429s, even when your plan is barely used). VaderShell sidesteps that entirely: it **shells out to the real `claude` CLI** you're already logged into, inheriting the exact auth that works in your terminal — full tools, your memory and skills, your subscription's allowance — with nothing to fake.
@@ -168,6 +216,61 @@ CLAUDE:     <approach · risks · steps>
 KIMI:       <approach · risks · steps>
 SYNTHESIS:  <agree / differ / recommendation>
 ```
+
+## Managing two machines (sync, conflicts, git status)
+
+Running VADER on two boxes? Keep your heads straight:
+
+### Check git status before pushing
+```powershell
+# From repo root — see what's changed locally
+git status
+git diff                  # see the actual changes
+git log --oneline -10     # last 10 commits
+```
+
+### Detect conflicts from the other machine
+```powershell
+# Fetch from remote to see what the other box did
+git fetch
+
+# Compare local vs remote
+git log --oneline -5 origin/master     # what's on the remote (other machine pushed)
+git log --oneline -5 HEAD              # what you have locally
+git diff HEAD origin/master            # diffs between them
+
+# If there are diverged branches:
+git status                              # will tell you "your branch and 'origin/master' have diverged"
+```
+
+### Before pulling from the other machine
+```powershell
+# Always check first
+git fetch
+git diff HEAD origin/master --stat     # summary of what changed
+git diff HEAD origin/master             # full diff
+
+# Then pull (merges the other machine's work)
+git pull
+
+# If merge conflict, git will tell you which files are broken. Fix them, then:
+git add <file>
+git commit -m "merge from remote"
+git push
+```
+
+**Golden rule**: fetch, check diffs, THEN pull. Never blindly pull and pray.
+
+### Seeing real-time progress in Discord
+
+When you message VADER, it now streams **thinking and tool use live** instead of just showing "typing...":
+- 💭 — model's reasoning
+- ⚙ — actions being taken (running commands, searching, etc.)
+- ↳ — results of those actions (truncated to 800 chars)
+
+The final answer follows. No more mystery black box.
+
+---
 
 ## Discord bot setup
 
