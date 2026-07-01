@@ -4,3 +4,4 @@ rich>=13
 python-dotenv>=1.0
 discord.py>=2.3.2
 ddgs>=6.0
+elevenlabs>=1.0

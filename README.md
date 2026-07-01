@@ -135,8 +135,9 @@ In Discord, VADER registers **native slash commands** (the `/` picker, shown und
 | `/model <opus\|sonnet\|haiku\|kimi>` | Switch VADER's brain and reboot onto it |
 | `/reset` | Clear VADER's conversation memory |
 | `/restart` | Reboot the gateway (reconnects in a few seconds) |
+| `/speak` | Toggle TalkyTalk voice summaries (spoken MP3 attachments) |
 
-`/restart` reboots a **supervised** process, so it reconnects in seconds and crashes auto-recover (up to 5×) — you can reboot the bot from your phone, away from the machine. `/model` writes a runtime override and reboots onto the new brain (handy if a model's quota runs dry mid-task). The same commands also work typed as plain text, as a fallback before the slash commands sync.
+`/restart` reboots a **supervised** process, so it reconnects in seconds and crashes auto-recover (up to 5×) — you can reboot the bot from your phone, away from the machine. `/model` writes a runtime override and reboots onto the new brain (handy if a model's quota runs dry mid-task). `/speak` toggles TalkyTalk voice summaries: when on, long replies attach a spoken MP3. The same commands also work typed as plain text, as a fallback before the slash commands sync.
 
 > **Editing `.env` or any `vader/*.py`? Run `/restart`** — config and code are only read at startup.
 
@@ -282,6 +283,19 @@ The final answer follows. No more mystery black box.
 6. Run `.\gateway.ps1` and message the bot in your server.
 
 > **One token = one running gateway.** Running the same bot token in two processes (two machines, or a stray window) makes Discord disconnect-loop both. For a bot on a second machine, give it its **own** Discord app/token.
+
+## Voice summaries (`/speak`)
+
+When enabled, VADER attaches a spoken MP3 to replies longer than 120 characters. Uses the existing TalkyTalk pipeline (`C:\Users\gwu07\machine-spirit\talkytalk\talkytalk.py`) with ElevenLabs online, or Windows SAPI offline.
+
+To enable by default, set in `.env`:
+
+```env
+VADER_TTS_ENABLED=true
+# optional: ELEVENLABS_API_KEY=*** (the script already reads its own .env if you skip this)
+```
+
+Toggle at runtime with `/speak` (slash) or `speak` typed as text. When TTS is off, the bot behaves exactly as before — no voice, no delay, no API calls.
 
 ## Coalition mode (optional)
 

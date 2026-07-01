@@ -10,6 +10,7 @@ Native slash commands (the `/` picker, shown under VADER):
   /model <name>    — switch VADER's brain (opus|sonnet|haiku|kimi) and reboot onto it
   /reset           — clear VADER's conversation memory
   /restart         — reboot the gateway (supervised; reconnects in a few seconds)
+  /speak           — toggle TalkyTalk voice summaries (spoken MP3 attachments)
 (The same commands also work typed as plain text, as a fallback.)
 
 Coalition mode: in a designated server/channel, a peer bot (Kimi/SERVITOR) answers
@@ -41,6 +42,7 @@ import discord
 from .auth import resolve
 from .core import Agent
 from .council import run_council, _ask_claude
+from . import tts
 
 # ── Logging ──
 _LOG_PATH = _ROOT / "gateway.log"
@@ -60,6 +62,7 @@ _ALLOWED_CHANNELS = {c.strip() for c in os.environ.get("VADER_DISCORD_CHANNEL_ID
 _COALITION_SERVER = os.environ.get("VADER_COALITION_SERVER_ID", "").strip()
 _COALITION_CHANNEL = os.environ.get("VADER_COALITION_CHANNEL_ID", "").strip()
 _PEER_BOT_ID = os.environ.get("VADER_PEER_BOT_ID", "").strip()
+_TTS_ENABLED = os.environ.get("VADER_TTS_ENABLED", "").strip().lower() in ("1", "true", "yes")
 _SETTLE_SECONDS = 5
 
 # /model aliases → (provider, model).
@@ -86,6 +89,7 @@ _HELP = (
     "`/model <opus|sonnet|haiku|kimi>` — switch VADER's brain and reboot onto it.\n"
     "`/reset` — clear VADER's conversation memory (start fresh).\n"
     "`/restart` — reboot the gateway (reconnects in a few seconds).\n"
+    "`/speak` — toggle TalkyTalk voice summaries (spoken MP3 attachments).\n"
     "`/help` — this list.\n"
     "Otherwise, just message me — I answer with full tools, web search, and your memory."
 )
@@ -100,22 +104,23 @@ def _split(text: str):
         text = text[_DISCORD_LIMIT:]
 
 
-async def _stream_turn_to_discord(agent: Agent, prompt: str, channel) -> None:
-    """Run a turn (in a thread) and post tool/thinking output then the answer.
+async def _stream_turn_to_discord(agent: Agent, prompt: str, channel) -> str:
+    """Run a turn (in a thread), post tool/thinking output, and return the final answer.
 
-    Thread-safe: the whole synchronous stream is drained in one worker thread,
-    then posted. (A queue-across-threads approach is NOT safe — asyncio.Queue
-    isn't thread-safe and the model can pause 20s+ between items.)
+    If voice summaries are enabled, the answer is also sent as a spoken MP3
+    attachment alongside the first text chunk.
     """
     log_lines, answer = await asyncio.to_thread(_drain_turn, agent, prompt)
+    answer = answer.strip()
 
-    # Post thinking/tool log first (so you can see what it did), then the answer.
+    # Post thinking/tool log first (so you can see what it did).
     if log_lines:
         for chunk in _split("\n".join(log_lines)):
             await channel.send(chunk)
-    if answer:
-        for chunk in _split(answer):
-            await channel.send(chunk)
+
+    # Post the final answer, optionally with a voice summary.
+    await _send_reply(channel, answer, with_tts=_tts_state["enabled"] and len(answer) > 120)
+    return answer
 
 
 def _drain_turn(agent: Agent, prompt: str):
@@ -200,9 +205,30 @@ def main() -> None:
     _last_op = {"t": 0.0}
     _debounce: dict = {}
     _restart = {"requested": False}
+    _tts_state = {"enabled": _TTS_ENABLED}
 
     def _is_operator(user_id) -> bool:
         return (not _ALLOWED_UID) or str(user_id) == _ALLOWED_UID
+
+    async def _send_reply(channel, text: str, with_tts: bool = False) -> None:
+        """Send text chunks, optionally attaching a spoken MP3 summary."""
+        audio_path = None
+        if with_tts and _tts_state["enabled"]:
+            try:
+                audio_path = await tts.speak_async(text)
+            except Exception as e:
+                log.warning("TTS generation failed: %s", e)
+
+        chunks = list(_split(text))
+        if audio_path and audio_path.exists():
+            # Send text in chunks, attach audio to the first chunk
+            first, rest = chunks[0], chunks[1:]
+            await channel.send(first, file=discord.File(str(audio_path)))
+            for chunk in rest:
+                await channel.send(chunk)
+        else:
+            for chunk in chunks:
+                await channel.send(chunk)
 
     # ── Coalition second-opinion (unchanged behaviour) ──
     async def _do_second_opinion(peer_message, kimi_said: str) -> None:
@@ -281,6 +307,15 @@ def main() -> None:
             return await interaction.response.send_message("Not authorised.", ephemeral=True)
         await interaction.response.send_message("♻ restarting gateway — back in a few seconds…")
         await _trigger_restart()
+
+    @tree.command(name="speak", description="Toggle TalkyTalk voice summaries (spoken MP3 attachments)")
+    async def _cmd_speak(interaction):
+        if not _is_operator(interaction.user.id):
+            return await interaction.response.send_message("Not authorised.", ephemeral=True)
+        _tts_state["enabled"] = not _tts_state["enabled"]
+        state = "ON" if _tts_state["enabled"] else "OFF"
+        log.info("TTS toggled -> %s", state)
+        await interaction.response.send_message(f"🔊 voice summaries **{state}**.")
 
     @tree.command(name="model", description="Switch VADER's brain and reboot (opus|sonnet|haiku|kimi)")
     @discord.app_commands.describe(name="opus, sonnet, haiku, or kimi")
@@ -363,6 +398,11 @@ def main() -> None:
             return
 
         # Text-command fallbacks (so they work even before slash commands sync).
+        if content == "/speak":
+            _tts_state["enabled"] = not _tts_state["enabled"]
+            state = "ON" if _tts_state["enabled"] else "OFF"
+            await message.channel.send(f"🔊 voice summaries **{state}**.")
+            return
         if content == "/reset":
             agent.reset()
             await message.channel.send("— conversation cleared —")
@@ -392,7 +432,6 @@ def main() -> None:
         log.info("answering operator")
         async with message.channel.typing():
             await _stream_turn_to_discord(agent, content, message.channel)
-
     client.run(_TOKEN)
     if _restart["requested"]:
         log.info("exiting (code 42) for supervisor restart")
